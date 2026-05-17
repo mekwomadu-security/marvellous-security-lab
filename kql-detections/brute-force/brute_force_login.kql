@@ -1,0 +1,77 @@
+// ============================================================
+// DETECTION: Brute Force Login Attack
+// MITRE ATT&CK: T1110.001 - Password Guessing
+// Severity: Medium / High / Critical
+// Data Source: SigninLogs (Azure AD / Entra ID)
+// Author: Marvellous Ekwomadu
+// Last Updated: 2025
+// False Positives: Scripted service accounts, bulk migration tools
+// Tuning: 5 failures in 10min (fast) and 5 failures in 30min (slow)
+// ============================================================
+let fastThreshold = 5;
+let fastWindow = 10m;
+let slowThreshold = 5;
+let slowWindow = 30m;
+
+let FastAttacks =
+    SigninLogs
+    | where TimeGenerated >= ago(1h)
+    | where ResultType != "0"
+    | summarize
+        FailedAttempts = count(),
+        DistinctIPs = dcount(IPAddress),
+        DistinctApps = dcount(AppDisplayName),
+        IPList = make_set(IPAddress, 10),
+        FirstAttempt = min(TimeGenerated),
+        LastAttempt = max(TimeGenerated)
+        by UserPrincipalName, bin(TimeGenerated, fastWindow)
+    | where FailedAttempts >= fastThreshold
+    | extend
+        AttackType = "Fast — automated attack",
+        AttackDuration = LastAttempt - FirstAttempt;
+
+let SlowAttacks =
+    SigninLogs
+    | where TimeGenerated >= ago(2h)
+    | where ResultType != "0"
+    | summarize
+        FailedAttempts = count(),
+        DistinctIPs = dcount(IPAddress),
+        DistinctApps = dcount(AppDisplayName),
+        IPList = make_set(IPAddress, 10),
+        FirstAttempt = min(TimeGenerated),
+        LastAttempt = max(TimeGenerated)
+        by UserPrincipalName, bin(TimeGenerated, slowWindow)
+    | where FailedAttempts >= slowThreshold
+    | extend
+        AttackType = "Low and slow — manual attacker",
+        AttackDuration = LastAttempt - FirstAttempt;
+
+FastAttacks
+| union SlowAttacks
+| extend
+    RiskScore = case(
+        FailedAttempts >= 20, "Critical",
+        FailedAttempts >= 10, "High",
+        FailedAttempts >= 5,  "Medium",
+        "Low"
+    ),
+    SuccessAfterFailure = iff(
+        FailedAttempts >= 5,
+        "Investigate — possible successful breach",
+        "Monitor"
+    )
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    FailedAttempts,
+    DistinctIPs,
+    DistinctApps,
+    AttackDuration,
+    AttackType,
+    IPList,
+    RiskScore,
+    SuccessAfterFailure,
+    FirstAttempt,
+    LastAttempt
+| sort by FailedAttempts desc
