@@ -8,8 +8,9 @@
 // False Positives: Scripted service accounts, bulk migration tools
 // Tuning: 5 failures in 10min (fast) and 5 failures in 30min (slow)
 // ============================================================
+
 let fastThreshold = 5;
-let fastWindow = 10m;
+let fastWindow = 10m; 
 let slowThreshold = 5;
 let slowWindow = 30m;
 

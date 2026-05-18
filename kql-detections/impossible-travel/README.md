@@ -27,7 +27,7 @@ DistanceKm = 6371 * 2 * asin(sqrt(
 ```
 This is the actual mathematical formula used in aviation and 
 navigation to calculate the shortest distance between two points 
-on a sphere. Most out-of-the-box rules just compare country codes. 
+on a sphere.
 This rule calculates the real kilometre distance between the two 
 login coordinates — far more precise and far harder to evade.
 
