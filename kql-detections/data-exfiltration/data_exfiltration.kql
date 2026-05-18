@@ -1,0 +1,83 @@
+// ============================================================
+// DETECTION: Data Exfiltration
+// MITRE ATT&CK: T1041 - Exfiltration Over C2 Channel
+// Severity: High / Critical
+// Data Source: CommonSecurityLog, AzureNetworkAnalytics
+// Author: Marvellous Ekwomadu
+// Last Updated: 2025
+// False Positives: Legitimate cloud backups, large file transfers
+// Tuning: 500MB threshold — adjust based on org baseline
+// ============================================================
+
+let timeWindow = 1h;
+let dataThresholdMB = 500;
+let suspiciousports = dynamic([20, 21, 22, 443, 4444, 8080, 8443]);
+let lookback = 24h;
+let knownSafeDestinations = dynamic([
+    "backup.internal.com",
+    "sharepoint.com",
+    "onedrive.com"
+]);
+
+CommonSecurityLog
+| where TimeGenerated >= ago(lookback)
+| where DeviceAction != "deny"
+| where isnotempty(SourceIP)
+| where isnotempty(DestinationIP)
+| extend
+    DataSentMB = round(todouble(SentBytes) / 1048576, 2),
+    DataReceivedMB = round(todouble(ReceivedBytes) / 1048576, 2)
+| where DataSentMB >= dataThresholdMB
+| where DestinationHostName !in (knownSafeDestinations)
+| summarize
+    TotalDataSentMB = sum(DataSentMB),
+    TotalDataReceivedMB = sum(DataReceivedMB),
+    UniqueDestinations = dcount(DestinationIP),
+    DestinationList = make_set(DestinationIP, 10),
+    PortsUsed = make_set(DestinationPort, 10),
+    SessionCount = count(),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by SourceIP, SourceUserName, bin(TimeGenerated, timeWindow)
+| extend
+    ExfiltrationDuration = LastSeen - FirstSeen,
+    RiskScore = case(
+        TotalDataSentMB >= 5000, "Critical",
+        TotalDataSentMB >= 2000, "High",
+        TotalDataSentMB >= 500,  "Medium",
+        "Low"
+    ),
+    ExfiltrationPattern = case(
+        UniqueDestinations >= 10,
+        "Scattered exfiltration — data sent to multiple destinations",
+        UniqueDestinations >= 5,
+        "Multi destination exfiltration — possible staging servers",
+        UniqueDestinations == 1,
+        "Single destination exfiltration — likely C2 server",
+        "Monitor"
+    ),
+    DataSummary = strcat(
+        tostring(round(TotalDataSentMB, 0)),
+        "MB sent to ",
+        tostring(UniqueDestinations),
+        " destination(s) over ",
+        tostring(SessionCount),
+        " sessions"
+    )
+| project
+    TimeGenerated,
+    SourceIP,
+    SourceUserName,
+    TotalDataSentMB,
+    TotalDataReceivedMB,
+    UniqueDestinations,
+    DestinationList,
+    PortsUsed,
+    SessionCount,
+    ExfiltrationDuration,
+    ExfiltrationPattern,
+    DataSummary,
+    RiskScore,
+    FirstSeen,
+    LastSeen
+| sort by TotalDataSentMB desc

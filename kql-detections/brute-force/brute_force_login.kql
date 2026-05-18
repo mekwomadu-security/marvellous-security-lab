@@ -9,7 +9,7 @@
 // Tuning: 5 failures in 10min (fast) and 5 failures in 30min (slow)
 // ============================================================
 
-let fastThreshold = 5;
+let fastThreshold = 5; // 5 passwords attempts
 let fastWindow = 10m; 
 let slowThreshold = 5;
 let slowWindow = 30m;
