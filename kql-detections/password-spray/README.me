@@ -1,0 +1,119 @@
+# Password Spray Detection
+
+## What this detects
+This rule detects password spray attacks where an attacker tries 
+one common password against many user accounts. Unlike brute force 
+which hammers one account with many passwords, password spray is 
+quiet and calculated — designed to avoid account lockouts and stay 
+under the radar of basic detection rules.
+
+A classic example is an attacker trying `Summer2024!` against 
+every account in an organisation. Only one attempt per account 
+means no lockouts, no noise, no alerts on standard rules.
+
+## Why this is different
+Most basic rules look for many failures on one account. Password 
+spray deliberately avoids that pattern. This detection flips the 
+logic entirely — it looks for one IP hitting many accounts instead 
+of many attempts on one account.
+
+### Flipped detection logic
+Standard brute force detection:
+- Many failures + one account = alert
+
+Password spray detection:
+- One IP + many accounts = alert
+
+```kql
+| summarize
+    UsersTargeted = dcount(UserPrincipalName),
+    FailedAttempts = count()
+    by IPAddress, bin(TimeGenerated, timeWindow)
+| where UsersTargeted >= minUsersTargeted
+```
+By grouping on `IPAddress` instead of `UserPrincipalName` this 
+rule catches what brute force detection completely misses.
+
+### Failure rate filter
+```kql
+| where FailureRate >= minFailureRate
+```
+Calculates the ratio of failures to users targeted. A legitimate 
+system error affects a few accounts. A spray attack affects many 
+accounts with a consistently high failure rate. This filter removes 
+noise and keeps only true spray patterns.
+
+### Attack pattern classification
+Every alert is automatically labelled with what stage of attack 
+this likely represents:
+
+| Users Targeted | Pattern | What it means |
+|---------------|---------|---------------|
+| 10-24 | Small scale spray | Attacker in reconnaissance phase |
+| 25-49 | Medium scale spray | Targeted attack on organisation |
+| 50+ | Large scale spray | Automated tool, full organisation at risk |
+
+This tells the SOC analyst not just that an attack happened but 
+how far along it is and how serious the threat is.
+
+### UserList field
+```kql
+UserList = make_set(UserPrincipalName, 20)
+```
+Captures up to 20 of the targeted accounts in one field. The 
+analyst can immediately see which users are at risk and prioritise 
+password resets and account reviews without running a separate query.
+
+### Risk scoring
+| Users Targeted | Risk Score |
+|---------------|------------|
+| 10+ | Medium |
+| 25+ | High |
+| 50+ | Critical |
+
+## How password spray connects to your other detections
+Password spray is rarely the end of an attack — it is the beginning:
+
+1. Attacker runs password spray → finds valid credentials
+2. Attacker logs in with stolen credentials → triggers impossible travel detection
+3. Attacker escalates privileges → triggers privilege escalation detection
+
+These three detections together cover the full attack chain from 
+credential theft to account compromise to privilege abuse.
+
+## MITRE ATT&CK
+| Field | Value |
+|-------|-------|
+| Tactic | Credential Access |
+| Technique | T1110 — Brute Force |
+| Sub-technique | T1110.003 — Password Spraying |
+
+## Data source
+- SigninLogs (Azure AD / Microsoft Entra ID)
+
+## Deployment
+1. Open Microsoft Sentinel
+2. Go to **Logs**
+3. Paste the query from `password_spray.kql`
+4. Set schedule to run every **20 minutes**
+5. Set alert threshold to **greater than 0 results**
+
+## Tuning
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| timeWindow | 20m | Time window to group attempts |
+| minUsersTargeted | 10 | Minimum accounts targeted to alert |
+| minFailureRate | 0.8 | Minimum 80% failure rate to filter noise |
+
+Lower `minUsersTargeted` to catch smaller targeted attacks. 
+Raise `minFailureRate` to reduce false positives from 
+legitimate system errors.
+
+## False positives
+- Bulk account provisioning with incorrect credentials
+- Migration tools authenticating against multiple accounts
+- Misconfigured applications attempting broad authentication
+
+## Author
+Marvellous Ekwomadu
+Built independently as part of the Marvellous Security Lab
