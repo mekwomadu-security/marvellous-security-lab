@@ -1,0 +1,77 @@
+// ============================================================
+// DETECTION: Impossible Travel
+// MITRE ATT&CK: T1078 - Valid Accounts
+// Severity: High
+// Data Source: SigninLogs (Azure AD / Entra ID)
+// Author: Marvellous Ekwomadu
+// Last Updated: 2025
+// False Positives: VPNs while assesing applicationns with active VPN, Tor exit nodes, proxies, split tunnelling
+// Tuning: Speed threshold 900km/h — above this is physically impossible
+// ============================================================
+
+let maxSpeedKmph = 900;
+let minDistanceKm = 100;
+let lookback = 1d;
+
+SigninLogs
+| where TimeGenerated >= ago(lookback)
+| where ResultType == "0"
+| where isnotempty(LocationDetails)
+| extend
+    Lat = todouble(LocationDetails.geoCoordinates.latitude),
+    Lon = todouble(LocationDetails.geoCoordinates.longitude),
+    City = tostring(LocationDetails.city),
+    Country = tostring(LocationDetails.countryOrRegion)
+| where isnotempty(Lat) and isnotempty(Lon)
+| sort by UserPrincipalName asc, TimeGenerated asc
+| serialize
+| extend
+    PrevTime = prev(TimeGenerated, 1),
+    PrevLat  = prev(Lat, 1),
+    PrevLon  = prev(Lon, 1),
+    PrevCity = prev(City, 1),
+    PrevCountry = prev(Country, 1),
+    PrevUser = prev(UserPrincipalName, 1)
+| where UserPrincipalName == PrevUser
+| extend
+    TimeDiffHours = datetime_diff('minute', TimeGenerated, PrevTime) / 60.0,
+    DistanceKm = 6371 * 2 * asin(sqrt(
+        sin((radians(Lat) - radians(PrevLat)) / 2) *
+        sin((radians(Lat) - radians(PrevLat)) / 2) +
+        cos(radians(PrevLat)) * cos(radians(Lat)) *
+        sin((radians(Lon) - radians(PrevLon)) / 2) *
+        sin((radians(Lon) - radians(PrevLon)) / 2)
+    ))
+| where TimeDiffHours > 0
+| extend SpeedKmph = DistanceKm / TimeDiffHours
+| where SpeedKmph > maxSpeedKmph
+| where DistanceKm > minDistanceKm
+| extend
+    RiskScore = case(
+        SpeedKmph >= 5000, "Critical",
+        SpeedKmph >= 2000, "High",
+        SpeedKmph >= 900,  "Medium",
+        "Low"
+    ),
+    TravelSummary = strcat(
+        "Login from ", PrevCity, " (", PrevCountry, ") then ",
+        City, " (", Country, ") in ",
+        round(TimeDiffHours, 2), " hours — ",
+        round(DistanceKm, 0), "km at ",
+        round(SpeedKmph, 0), "km/h"
+    )
+| project
+    AlertTime     = TimeGenerated,
+    User          = UserPrincipalName,
+    FromCity      = PrevCity,
+    FromCountry   = PrevCountry,
+    ToCity        = City,
+    ToCountry     = Country,
+    DistanceKm    = round(DistanceKm, 0),
+    TimeDiffHours = round(TimeDiffHours, 2),
+    SpeedKmph     = round(SpeedKmph, 0),
+    RiskScore,
+    TravelSummary,
+    IPAddress,
+    AppDisplayName
+| sort by SpeedKmph desc
