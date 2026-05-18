@@ -1,0 +1,76 @@
+// ============================================================
+// DETECTION: Privilege Escalation
+// MITRE ATT&CK: T1078.002 - Valid Accounts: Domain Accounts
+// Severity: High / Critical
+// Data Source: AuditLogs (Azure AD / Entra ID)
+// Author: Marvellous Ekwomadu
+// Last Updated: 2025
+// False Positives: Planned admin provisioning, IT helpdesk activity
+// Tuning: Monitors role assignments and group membership changes
+// ============================================================
+
+let sensitiveRoles = dynamic([
+    "Global Administrator",
+    "Privileged Role Administrator",
+    "Security Administrator",
+    "Exchange Administrator",
+    "SharePoint Administrator",
+    "User Account Administrator",
+    "Conditional Access Administrator",
+    "Application Administrator",
+    "Cloud Application Administrator",
+    "Helpdesk Administrator"
+]);
+
+let lookback = 1d;
+
+AuditLogs
+| where TimeGenerated >= ago(lookback)
+| where OperationName in (
+    "Add member to role",
+    "Add eligible member to role",
+    "Add user to group",
+    "Update role assignment"
+)
+| extend
+    TargetUser = tostring(TargetResources[0].userPrincipalName),
+    TargetRole = tostring(TargetResources[0].displayName),
+    InitiatedBy = tostring(InitiatedBy.user.userPrincipalName),
+    InitiatedByIP = tostring(InitiatedBy.user.ipAddress)
+| where TargetRole in (sensitiveRoles)
+| extend
+    RiskScore = case(
+        TargetRole == "Global Administrator", "Critical",
+        TargetRole == "Privileged Role Administrator", "Critical",
+        TargetRole == "Security Administrator", "High",
+        TargetRole == "Conditional Access Administrator", "High",
+        "Medium"
+    ),
+    EscalationType = case(
+        InitiatedBy == TargetUser, 
+        "Self escalation — user assigned own privileges",
+        "Third party escalation — admin assigned by another user"
+    ),
+    RiskContext = case(
+        TargetRole == "Global Administrator",
+        "Full tenant control — highest possible privilege",
+        TargetRole == "Privileged Role Administrator",
+        "Can assign any role — effectively Global Admin",
+        TargetRole == "Security Administrator",
+        "Can modify security policies and disable protections",
+        TargetRole == "Conditional Access Administrator",
+        "Can disable MFA and bypass access controls",
+        "Elevated privilege assigned — review required"
+    )
+| project
+    TimeGenerated,
+    TargetUser,
+    TargetRole,
+    InitiatedBy,
+    InitiatedByIP,
+    EscalationType,
+    RiskScore,
+    RiskContext,
+    OperationName,
+    CorrelationId
+| sort by RiskScore asc
