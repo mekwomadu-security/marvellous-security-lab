@@ -1,0 +1,73 @@
+// ============================================================
+// DETECTION: Lateral Movement
+// MITRE ATT&CK: T1021 - Remote Services
+// Severity: High / Critical
+// Data Source: SecurityEvent, DeviceLogonEvents (Microsoft Defender)
+// Author: Marvellous Ekwomadu
+// Last Updated: 2025
+// False Positives: IT admin remote access, legitimate RDP sessions
+// Tuning: 3 or more unique machines accessed within 1 hour
+// ============================================================
+
+let timeWindow = 1h;
+let minMachinesAccessed = 3;
+let sensitiveProtocols = dynamic(["SMB", "RDP", "WinRM", "DCOM"]);
+let lookback = 24h;
+
+SecurityEvent
+| where TimeGenerated >= ago(lookback)
+| where EventID in (4624, 4648, 4672)
+| where LogonType in (3, 10)
+| extend
+    LogonTypeDesc = case(
+        LogonType == 3,  "Network logon — SMB/RDP",
+        LogonType == 10, "Remote interactive — RDP",
+        "Other"
+    )
+| summarize
+    MachinesAccessed = dcount(Computer),
+    MachineList = make_set(Computer, 20),
+    LogonCount = count(),
+    UniqueLogonTypes = dcount(LogonType),
+    FirstAccess = min(TimeGenerated),
+    LastAccess = max(TimeGenerated)
+    by Account, IpAddress, bin(TimeGenerated, timeWindow)
+| where MachinesAccessed >= minMachinesAccessed
+| extend
+    MovementDuration = LastAccess - FirstAccess,
+    MovementSpeed = MachinesAccessed / 1,
+    RiskScore = case(
+        MachinesAccessed >= 20, "Critical",
+        MachinesAccessed >= 10, "High",
+        MachinesAccessed >= 3,  "Medium",
+        "Low"
+    ),
+    MovementPattern = case(
+        MachinesAccessed >= 20, 
+        "Worm-like propagation — automated lateral movement tool",
+        MachinesAccessed >= 10, 
+        "Aggressive lateral movement — attacker pivoting rapidly",
+        MachinesAccessed >= 3,  
+        "Early lateral movement — attacker exploring network",
+        "Monitor"
+    ),
+    BlastRadius = strcat(
+        tostring(MachinesAccessed), 
+        " machines accessed in ",
+        tostring(timeWindow),
+        " — immediate containment required if confirmed"
+    )
+| project
+    TimeGenerated,
+    Account,
+    IpAddress,
+    MachinesAccessed,
+    MachineList,
+    LogonCount,
+    MovementDuration,
+    MovementPattern,
+    BlastRadius,
+    RiskScore,
+    FirstAccess,
+    LastAccess
+| sort by MachinesAccessed desc
