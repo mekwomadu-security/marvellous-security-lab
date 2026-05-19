@@ -20,6 +20,7 @@ out of the box.
 | Brute Force Login | T1110.001 | High |
 | Impossible Travel | T1078 | High |
 | Igestion Anomaly Detection | Custom | High |
+| others |MITRE ATT&CK & Custom | Low, Medium, High |
 
 ## About me
 Passionate about security engineering and obsessed with building 
