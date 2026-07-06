@@ -1,1 +1,200 @@
-
+---------------------------------------------------------------------------------------------------------------------------------------------
+Detects abnormal hourly drops in total log ingestion using a 14‑day rolling median baseline.
+Triggers when ingestion for a completed hour falls below acceptable volume thresholds.
+Includes informational table‑level hour‑over‑hour ingestion changes to assist with triage and root cause analysis. Runs continuously (24/7).
+---------------------------------------------------------------------------------------------------------------------------------------------
+let BaselineDays = 14;
+let Threshold = 0.50;
+let NowLocal = datetime_utc_to_local(now(), "Canada/Saskatchewan");
+let TodayStart = startofday(NowLocal);
+let CurrentHourStart = bin(NowLocal, 1h);
+let HourlyBaseline =
+    union isfuzzy=true
+        Device*,
+        Email*,
+        SigninLogs,
+        Syslog,
+        AuditLogs,
+        AzureActivity,
+        SecurityAlert,
+        CommonSecurityLog
+    | extend LocalTime = datetime_utc_to_local(TimeGenerated, "Canada/Saskatchewan")
+    | where LocalTime between (ago(BaselineDays * 1d) .. TodayStart)
+    | extend HourStart = bin(LocalTime, 1h)
+    | extend HourOfDay = datetime_part("Hour", HourStart)
+    | summarize HourlyLogs = count() by HourStart, HourOfDay
+    | summarize
+        BaselineMedian = percentile(HourlyLogs, 50),
+        BaselineMinAcceptable = percentile(HourlyLogs, 50) * Threshold
+        by HourOfDay;
+let TodayHourlyIngestion =
+    union isfuzzy=true
+        Device*,
+        Email*,
+        SigninLogs,
+        Heartbeat,
+        Syslog,
+        AADRiskyUsers,
+        AuditLogs,
+        AzureActivity,
+        SecurityAlert,
+        CommonSecurityLog
+    | extend LocalTime = datetime_utc_to_local(TimeGenerated, "Canada/Saskatchewan")
+    | where LocalTime between (TodayStart .. NowLocal)
+    | extend HourStart = bin(LocalTime, 1h)
+    | where HourStart < CurrentHourStart
+    | extend HourOfDay = datetime_part("Hour", HourStart)
+    | summarize CurrentHourLogs = count() by HourStart, HourOfDay;
+let PerTableHourly =
+    union withsource=SourceTable isfuzzy=true
+        Device*,
+        Email*,
+        SigninLogs,
+        Heartbeat,
+        Syslog,
+        AADRiskyUsers,
+        AuditLogs,
+        AzureActivity,
+        SecurityAlert,
+        CommonSecurityLog
+    | extend LocalTime = datetime_utc_to_local(TimeGenerated, "Canada/Saskatchewan")
+    | where LocalTime between (TodayStart .. NowLocal)
+    | extend HourStart = bin(LocalTime, 1h)
+    | where HourStart < CurrentHourStart
+    | summarize LogsThisHour = count() by SourceTable, HourStart;
+let FirstHour =
+    toscalar(
+    PerTableHourly
+    | summarize min(HourStart)
+    );
+let TableDeltas =
+    PerTableHourly
+    | join kind=inner (
+        PerTableHourly
+        | extend PrevHourStart = HourStart
+        | project SourceTable, PrevHourStart, LogsPrevHour = LogsThisHour
+        )
+        on SourceTable
+    | where HourStart == PrevHourStart + 1h
+    | join kind=inner (
+        TodayHourlyIngestion
+        | project HourStart, CurrentHourLogs
+        )
+        on HourStart
+    | extend ContributionPercent = round(100.0 * LogsThisHour / CurrentHourLogs, 2)
+    | extend Delta = LogsThisHour - LogsPrevHour
+    | extend DeltaPercent = round(100.0 * Delta / LogsPrevHour, 2)
+    | extend Severity = "INFO"
+    | extend Impact = iff(DeltaPercent <= -50, "🔴 DROP", "NORMAL")
+    | project
+        HourStart,
+        Table = SourceTable,
+        PrevHour = LogsPrevHour,
+        CurrentHour = LogsThisHour,
+        Delta,
+        DeltaPercent,
+        ContributionPercent,
+        Severity,
+        Impact;
+let TableCountsOnly =
+    PerTableHourly
+    | where HourStart == FirstHour
+    | join kind=inner (
+        TodayHourlyIngestion
+        | project HourStart, CurrentHourLogs
+        )
+        on HourStart
+    | extend ContributionPercent = round(100.0 * LogsThisHour / CurrentHourLogs, 2)
+    | extend Severity = "INFO"
+    | project
+        HourStart,
+        Table = SourceTable,
+        PrevHour = long(null),
+        CurrentHour = LogsThisHour,
+        Delta = long(null),
+        DeltaPercent = real(null),
+        ContributionPercent,
+        Impact = "NORMAL",
+        Severity;
+let TablesBreakdown =
+    union TableDeltas, TableCountsOnly
+    | sort by Impact desc, abs(DeltaPercent) desc nulls last
+    | summarize TablesBreakdown = make_list(
+                                      pack(
+    "Table",
+    Table,
+    "PrevHour",
+    PrevHour,
+    "CurrentHour",
+    CurrentHour,
+    "Delta",
+    Delta,
+    "DeltaPercent",
+    DeltaPercent,
+    "ContributionPercent",
+    ContributionPercent,
+    "Severity",
+    Severity,
+    "Impact",
+    Impact
+)
+)
+        by HourStart;
+let CommonSecurityLogBreakdown =
+    CommonSecurityLog
+    | extend LocalTime = datetime_utc_to_local(TimeGenerated, "Canada/Saskatchewan")
+    | where LocalTime between (TodayStart .. NowLocal)
+    | extend HourStart = bin(LocalTime, 1h)
+    | where HourStart < CurrentHourStart
+    | where DeviceVendor == "Check Point" or DeviceProduct == "eDirectory"
+    | extend Source =
+        case(
+    DeviceVendor == "Check Point",
+    "Check Point",
+    DeviceProduct == "eDirectory",
+    "eDirectory",
+    "Other"
+)
+    | summarize SourceLogs = count() by HourStart, Source
+    | summarize CommonSecurityLogSources =
+        make_list(pack("Source", Source, "LogCount", SourceLogs))
+        by HourStart;
+let SyslogNAMBreakdown =
+    Syslog
+    | extend LocalTime = datetime_utc_to_local(TimeGenerated, "Canada/Saskatchewan")
+    | where LocalTime between (TodayStart .. NowLocal)
+    | extend HourStart = bin(LocalTime, 1h)
+    | where HourStart < CurrentHourStart
+    | where Computer startswith "nam"
+    | summarize NAMLogs = count() by HourStart
+    | summarize SyslogNAMSources =
+        make_list(
+    pack(
+    "Source",
+    "NAM (Syslog)",
+    "LogCount",
+    NAMLogs
+)
+)
+        by HourStart;
+TodayHourlyIngestion
+| join kind=leftouter HourlyBaseline on HourOfDay
+| join kind=leftouter TablesBreakdown on HourStart
+| join kind=leftouter CommonSecurityLogBreakdown on HourStart
+| join kind=leftouter SyslogNAMBreakdown on HourStart
+| extend IngestionState =
+    iff(CurrentHourLogs < BaselineMinAcceptable, "HIGH", "NORMAL")
+| extend HourRange = strcat(HourOfDay, ":00–", HourOfDay + 1, ":00")
+| project
+    HourStart,
+    HourRange,
+    HourOfDay,
+    CurrentHourLogs,
+    BaselineMedian,
+    BaselineMinAcceptable,
+    IngestionState,
+    TablesBreakdown,
+    CommonSecurityLogSources,
+    SyslogNAMSources
+| where IngestionState == "HIGH"
+| order by HourStart asc
