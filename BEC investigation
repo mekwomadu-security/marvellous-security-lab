@@ -1,0 +1,4 @@
+OfficeActivity
+| where tostring(ClientIP) in ("")
+| project TimeGenerated, ClientIP, Operation, Activity, OfficeWorkload, UserId, UserKey, UserType, ResultStatus, ResultReasonType, Site_Url, SourceFileName, DestinationFileName, OfficeObjectId, Parameters
+| order by TimeGenerated asc
