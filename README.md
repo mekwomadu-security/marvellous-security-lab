@@ -14,13 +14,11 @@ out of the box.
 - **PowerShell Scripts** — Incident response and automation 
 - **Python Tools** — Threat hunting, scripting and log analysis 
 
-## Detections covered
-| Rule | MITRE Tactic | Severity |
-|------|-------------|----------|
-| Brute Force Login | T1110.001 | High |
-| Impossible Travel | T1078 | High |
-| Igestion Anomaly Detection | Custom | High |
-| Detection Algorithms |MITRE ATT&CK & Custom | Low, Medium, High |
+## Various Detection Logic will  be covered covered including 
+- custom Rules
+-Enhancment of existing Rules
+
+
 
 ## About me
 Passionate about security engineering and obsessed with building 
