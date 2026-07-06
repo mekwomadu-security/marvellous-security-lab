@@ -1,0 +1,22 @@
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+VPN logic: Open‑source VPN IP ranges were ingested into Blob Storage and used to validate log data against known VPN endpoints.
+----------------------------------------------------------------------------------------------------------------------------
+// VPN logic: Open-source VPN CIDR ranges are ingested from Azure Blob Storage
+// and correlated against sign-in IP addresses.
+
+let VPNRanges = toscalar(
+    externaldata (CIDR:string) [
+        @"https://<blob-storage-url>/vpn_cidr_list.txt"
+    ] with (format="txt", ignoreFirstRecord=false)
+    | summarize make_list(CIDR)
+);
+SigninLogs
+| where TimeGenerated > ago(7d)
+| extend IsVPN = ipv4_is_in_any_range(IPAddress, VPNRanges)
+| where IsVPN == true
+| extend GeoLocation = geo_info_from_ip_address(IPAddress)
+| extend
+    Country = tostring(parse_json(GeoLocation).country),
+    State   = tostring(parse_json(GeoLocation).state),
+    City    = tostring(parse_json(GeoLocation).city)
+| project TimeGenerated, UserPrincipalName, IPAddress, Country, State, City, IsVPN
