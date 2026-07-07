@@ -1,1 +1,60 @@
-
+let starttime = ago(1d);
+let lookback = starttime - 14d;
+let HistoricalIPs =
+SigninLogs
+| where TimeGenerated between (lookback .. starttime)
+| where UserPrincipalName endswith ""
+    or UserPrincipalName endswith ""
+| extend UserPrincipalName = tolower(UserPrincipalName)
+| summarize by UserPrincipalName, IPAddress;
+let NewLocationIPUsers =
+SigninLogs
+| where TimeGenerated between (starttime .. now())
+| where UserPrincipalName endswith ""
+    or UserPrincipalName endswith ""
+| extend UserPrincipalName = tolower(UserPrincipalName)
+| join kind=leftanti HistoricalIPs
+    on UserPrincipalName, IPAddress
+| summarize
+    SignInCount = count(),
+    CurrentSessionIds = make_set(SessionId),
+    IPAddresses = make_set(IPAddress),
+    Countries = make_set(tostring(LocationDetails.countryOrRegion)),
+    States = make_set(tostring(LocationDetails.state)),
+    Cities = make_set(tostring(LocationDetails.city)),
+    FirstSignIn=min(TimeGenerated)
+    by UserPrincipalName;
+let SuspiciousMailboxActivity =
+OfficeActivity
+| where TimeGenerated between (starttime .. now())
+| where Operation in (
+    "New-InboxRule",
+    "Set-InboxRule",
+    "Remove-InboxRule",
+    "Disable-InboxRule",
+    "Set-Mailbox",
+    "Add-MailboxPermission",
+    "UpdateInboxRules"
+)
+or Parameters contains "ForwardTo"
+or Parameters contains "RedirectTo"
+or Parameters contains "ForwardingSmtpAddress"
+| extend UserPrincipalName = tolower(tostring(UserId));
+NewLocationIPUsers
+| join kind=inner SuspiciousMailboxActivity
+    on UserPrincipalName
+| where TimeGenerated >= FirstSignIn
+| project
+    UserPrincipalName,
+    IPAddresses,
+    Countries,
+    States,
+    Cities,
+    CurrentSessionIds,
+    SignInCount,
+    OfficeActivityTime = TimeGenerated,
+    Operation,
+    Parameters,
+    ClientIP,
+    OfficeObjectId
+| order by OfficeActivityTime desc
