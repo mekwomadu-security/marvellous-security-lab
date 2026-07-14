@@ -1,0 +1,50 @@
+
+let Urls =
+EmailUrlInfo
+| summarize Urls = make_set(Url) by NetworkMessageId;
+EmailEvents
+| where TimeGenerated >= ago(1h)
+| where (
+    SenderDisplayName has_any (
+        "YourOrg@domain" // your oraginization domain
+
+)
+| where not(Subject matches regex @"^(?i)(re:|fw:)")
+| where SenderFromDomain !in~ (
+// reduce false positive by removing emails or domains that your org do business with.
+   )
+| extend RiskScore = 50
+| extend RiskScore = RiskScore +
+    iff(
+        Subject has_any (
+            "Urgent... ", // adjust  to the sensitive keywords in your logs 
+        ),
+        20,
+        0
+    )
+| extend RiskScore = RiskScore +
+    iff(SenderDisplayName contains "|", 10, 0) // pattern for finance documents aor search for paterns in your org...Document Naming
+| extend RiskScore = RiskScore +
+    iff(UrlCount > 0, 10, 0)
+| extend RiskScore = RiskScore +
+    iff(LatestDeliveryAction == "Delivered", 10, 0)
+| join kind=leftouter Urls on NetworkMessageId
+| project
+    TimeGenerated,
+    RiskScore,
+    SenderDisplayName,
+    SenderFromAddress,
+    SenderFromDomain,
+    RecipientEmailAddress,
+    Subject,
+    UrlCount,
+    ThreatTypes,
+    ThreatNames,
+    LatestDeliveryAction,
+    LatestDeliveryLocation,
+    NetworkMessageId,
+    InternetMessageId,
+    Urls
+| where RiskScore >= 70 // adjust risk scrore to that ot your org
+| where LatestDeliveryLocation contains "Inbox" // where emails where missed by MS and they were delievered.
+| order by RiskScore desc, TimeGenerated desc // 
