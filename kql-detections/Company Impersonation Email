@@ -46,5 +46,5 @@ EmailEvents
     InternetMessageId,
     Urls
 | where RiskScore >= 70 // adjust risk scrore to that ot your org
-| where LatestDeliveryLocation contains "Inbox" // where emails where missed by MS and they were delievered.
+| where LatestDeliveryLocation contains "Inbox" // where emails were missed by MS and they were delievered to inbox.
 | order by RiskScore desc, TimeGenerated desc // 
