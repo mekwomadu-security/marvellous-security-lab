@@ -1,1 +1,95 @@
 
+ 
+let correlationWindow = 30m;
+let InteractiveSessions =
+SigninLogs
+| where TimeGenerated between (datetime(2026-05-20) .. datetime(2026-06-10 23:59:59))
+| where UserPrincipalName endswith ""
+    or UserPrincipalName endswith ""
+| where ResultType == 0
+| where AppDisplayName has_any (
+    "SharePoint",
+    "OneDrive",
+    "Office 365 Exchange Online",
+    "Exchange Online",
+    "Outlook"
+)
+| where isnotempty(UserPrincipalName)
+| extend UserUpn = tolower(UserPrincipalName)
+| extend InteractiveCountry = tostring(parse_json(LocationDetails).countryOrRegion)
+| extend InteractiveState = tostring(parse_json(LocationDetails).state)
+| extend InteractiveCity = tostring(parse_json(LocationDetails).city)
+| project
+    UserUpn,
+    InteractiveTime = TimeGenerated,
+    InteractiveIp = IPAddress,
+    InteractiveCountry,
+    InteractiveState,
+    InteractiveCity,
+    InteractiveRisk = RiskLevelDuringSignIn,
+    InteractiveRiskDetail = RiskDetail,
+    InteractiveApp = AppDisplayName,
+    InteractiveCorrelationId = CorrelationId;
+AADNonInteractiveUserSignInLogs
+| where TimeGenerated between (datetime(2026-05-20) .. datetime(2026-06-10 23:59:59))
+| where UserPrincipalName endswith ""
+    or UserPrincipalName endswith ""
+| where ResultType == 0
+| where AppDisplayName has_any (
+    "SharePoint",
+    "OneDrive",
+    "Office 365 Exchange Online",
+    "Exchange Online",
+    "Outlook"
+)
+| where isnotempty(UserPrincipalName)
+| extend UserUpn = tolower(UserPrincipalName)
+| extend NonInteractiveCountry = tostring(parse_json(LocationDetails).countryOrRegion)
+| extend NonInteractiveState = tostring(parse_json(LocationDetails).state)
+| extend NonInteractiveCity = tostring(parse_json(LocationDetails).city)
+| join kind=inner InteractiveSessions on UserUpn
+| where TimeGenerated between (InteractiveTime .. (InteractiveTime + correlationWindow))
+| where isnotempty(IPAddress)
+| where isnotempty(InteractiveIp)
+| where IPAddress != InteractiveIp
+| where NonInteractiveCountry != InteractiveCountry
+| extend AccountName = tostring(split(UserUpn, "@")[0])
+| extend AccountUPNSuffix = tostring(split(UserUpn, "@")[1])
+| extend TimeDifferenceMinutes = datetime_diff("minute", TimeGenerated, InteractiveTime)
+| extend Severity = iff(
+    RiskLevelDuringSignIn == "high",
+    "Critical",
+    iff(
+        RiskLevelDuringSignIn == "medium",
+        "High",
+        "Medium"
+    )
+)
+| extend DetectionType = "Potential AiTM / Session Token Theft Pattern"
+| summarize arg_max(TimeGenerated, *) by UserUpn
+| project
+    TimeGenerated,
+    Severity,
+    DetectionType,
+    TimeDifferenceMinutes,
+    UserUpn,
+    AccountName,
+    AccountUPNSuffix,
+    AppDisplayName,
+    NonInteractiveIp = IPAddress,
+    NonInteractiveCountry,
+    NonInteractiveState,
+    NonInteractiveCity,
+    InteractiveIp,
+    InteractiveCountry,
+    InteractiveState,
+    InteractiveCity,
+    InteractiveTime,
+    InteractiveApp,
+    RiskLevelDuringSignIn,
+    RiskDetail,
+    ConditionalAccessStatus,
+    CorrelationId,
+    InteractiveCorrelationId
+| order by InteractiveIp
+ 
