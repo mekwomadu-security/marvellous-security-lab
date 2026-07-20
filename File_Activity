@@ -1,0 +1,16 @@
+
+OfficeActivity
+| where TimeGenerated >= ago(30d)
+| where UserId =~ ""
+| where Operation has_any (
+    "SharingInvitationCreated",
+    "AnonymousLinkCreated",
+    "SecureLinkCreated",
+    "AddedToSecureLink",
+    "SharingSet"
+)
+| project TimeGenerated, Operation, UserId,
+          Site_Url, SourceFileName,
+          TargetUserOrGroupName,
+          ClientIP
+| order by TimeGenerated desc
