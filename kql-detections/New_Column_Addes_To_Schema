@@ -1,0 +1,28 @@
+let Baseline =
+_GetWatchlist('your_watch_list_Alias_Name_sentinel')
+| project TableName, ColumnName, ColumnType;
+let CurrentSchema =
+union
+(SigninLogs | getschema | extend TableName="SigninLogs"),
+(AuditLogs | getschema | extend TableName="AuditLogs"),
+(AzureActivity | getschema | extend TableName="AzureActivity"),
+(CommonSecurityLog | getschema | extend TableName="CommonSecurityLog"),
+(SecurityAlert | getschema | extend TableName="SecurityAlert"),
+(Syslog | getschema | extend TableName="Syslog"),
+(DeviceEvents | getschema | extend TableName="DeviceEvents"),
+(DeviceNetworkEvents | getschema | extend TableName="DeviceNetworkEvents"),
+(DeviceProcessEvents | getschema | extend TableName="DeviceProcessEvents"),
+(DeviceLogonEvents | getschema | extend TableName="DeviceLogonEvents"),
+(EmailEvents | getschema | extend TableName="EmailEvents"),
+(EmailAttachmentInfo | getschema | extend TableName="EmailAttachmentInfo"),
+(EmailUrlInfo | getschema | extend TableName="EmailUrlInfo"),
+(EmailPostDeliveryEvents | getschema | extend TableName="EmailPostDeliveryEvents")
+| project TableName, ColumnName, ColumnType;
+CurrentSchema
+| join kind=leftanti Baseline
+    on TableName, ColumnName, ColumnType
+| summarize
+    ChangedColumns = make_set(ColumnName),
+    ChangeCount = count()
+by TableName
+| where ChangeCount > 0
