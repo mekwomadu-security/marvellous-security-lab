@@ -1,1 +1,53 @@
+1- Email Events
+EmailEvents
+| where SenderFromDomain == "surfactantsupplier.com"
+| project NetworkMessageId, Subject, SenderFromAddress
 
+
+2-let SuspiciousEmails =
+EmailEvents
+| where SenderFromDomain == ".com"
+| distinct NetworkMessageId;
+UrlClickEvents
+| where NetworkMessageId in (SuspiciousEmails)
+
+3- DeviceLogonEvents // identify the device used 
+| where AccountUpn == ""
+| where Timestamp between (datetime(2026-08-10 15:35:00) .. datetime(2026-08-10 15:50:00))
+
+4-DeviceNetworkEvents  // check malicous sites connections 
+| where DeviceName == "<DeviceName>"
+| where RemoteUrl contains "malicious-domain.com"
+| order by Timestamp desc
+
+5- check for execution
+DeviceProcessEvents
+| where DeviceName == "<DeviceName>"
+| where Timestamp > ago(1d)
+| order by Timestamp desc
+
+Look for:
+
+powershell.exe
+cmd.exe
+wscript.exe
+cscript.exe
+mshta.exe
+rundll32.exe
+
+6-SigninLogs // could dothis first if possoible or use sigin logs
+| where UserPrincipalName == ""
+| where TimeGenerated > ago(1d)
+| order by TimeGenerated desc
+
+7-AuditLogs
+| where TimeGenerated > ago(1d)
+| where InitiatedBy.user.userPrincipalName == ""
+
+8-OfficeActivity
+| where UserId == ""
+| where TimeGenerated > ago(1d)
+
+9- DeviceEvents
+| where DeviceName == "<DeviceName>"
+| where Timestamp > ago(1d)
