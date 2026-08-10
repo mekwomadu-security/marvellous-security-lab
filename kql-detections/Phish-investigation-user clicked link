@@ -51,3 +51,5 @@ rundll32.exe
 9- DeviceEvents
 | where DeviceName == "<DeviceName>"
 | where Timestamp > ago(1d)
+
+10-// check for ip f there was a successful login and also check the cloud app events on that Ip.
