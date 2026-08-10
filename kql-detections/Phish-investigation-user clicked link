@@ -1,4 +1,4 @@
-1- Email Events
+1- Email Events  // if click allowed
 EmailEvents
 | where SenderFromDomain == "surfactantsupplier.com"
 | project NetworkMessageId, Subject, SenderFromAddress
