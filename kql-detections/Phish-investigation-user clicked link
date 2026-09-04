@@ -53,3 +53,11 @@ rundll32.exe
 | where Timestamp > ago(1d)
 
 10-// check for ip f there was a successful login and also check the cloud app events on that Ip.
+
+
+AuditLogs
+| where OperationName == "Recover device local administrator password"
+| where TargetResources[0].displayName contains " "
+| extend userPrincipalName_ = tostring(parse_json(tostring(InitiatedBy.user)).userPrincipalName)
+| extend displayName_ = tostring(TargetResources[0].displayName)
+ 
